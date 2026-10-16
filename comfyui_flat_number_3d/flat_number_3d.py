@@ -3,11 +3,112 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections import deque
 
-import cv2
 import numpy as np
 import torch
 from PIL import Image
+
+
+def _close_mask(mask, radius=2):
+    """Small morphology close implemented with NumPy only."""
+    padded = np.pad(mask, radius, constant_values=False)
+    windows = np.lib.stride_tricks.sliding_window_view(padded, (radius * 2 + 1,) * 2)
+    dilated = windows.any(axis=(-2, -1))
+    padded = np.pad(dilated, radius, constant_values=True)
+    windows = np.lib.stride_tricks.sliding_window_view(padded, (radius * 2 + 1,) * 2)
+    return windows.all(axis=(-2, -1))
+
+
+def _largest_component(mask):
+    """Keep the largest 4-connected foreground island."""
+    height, width = mask.shape
+    seen = np.zeros_like(mask, dtype=bool)
+    largest = []
+    for sy, sx in zip(*np.where(mask & ~seen)):
+        if seen[sy, sx]:
+            continue
+        queue = deque([(int(sy), int(sx))])
+        seen[sy, sx] = True
+        component = []
+        while queue:
+            y, x = queue.popleft()
+            component.append((y, x))
+            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if 0 <= ny < height and 0 <= nx < width and mask[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    queue.append((ny, nx))
+        if len(component) > len(largest):
+            largest = component
+    result = np.zeros_like(mask, dtype=bool)
+    if largest:
+        ys, xs = zip(*largest)
+        result[np.asarray(ys), np.asarray(xs)] = True
+    return result
+
+
+def _simplify(points, tolerance):
+    """Ramer-Douglas-Peucker simplification for a closed pixel boundary."""
+    if len(points) < 4:
+        return points
+    pts = np.asarray(points, dtype=np.float64)
+
+    def rdp(segment):
+        if len(segment) <= 2:
+            return segment
+        start, end = segment[0], segment[-1]
+        line = end - start
+        length = np.linalg.norm(line)
+        distances = np.linalg.norm(segment - start, axis=1) if length == 0 else np.abs(np.cross(line, segment - start) / length)
+        index = int(np.argmax(distances))
+        if distances[index] <= tolerance:
+            return np.asarray([start, end])
+        return np.vstack((rdp(segment[:index + 1])[:-1], rdp(segment[index:])))
+
+    # Rotate a closed loop to a stable extremity before treating it as an open line.
+    pivot = int(np.argmin(pts[:, 0] + pts[:, 1] * 1e-3))
+    opened = np.vstack((pts[pivot:], pts[:pivot], pts[pivot]))
+    return [tuple(p) for p in rdp(opened)[:-1]]
+
+
+def _boundary_loops(mask):
+    """Trace outer and hole boundaries along foreground pixel edges."""
+    height, width = mask.shape
+    edges = {}
+
+    def add(start, end):
+        edges.setdefault(start, []).append(end)
+
+    for y, x in zip(*np.where(mask)):
+        x, y = int(x), int(y)
+        if y == 0 or not mask[y - 1, x]:
+            add((x, y), (x + 1, y))
+        if x == width - 1 or not mask[y, x + 1]:
+            add((x + 1, y), (x + 1, y + 1))
+        if y == height - 1 or not mask[y + 1, x]:
+            add((x + 1, y + 1), (x, y + 1))
+        if x == 0 or not mask[y, x - 1]:
+            add((x, y + 1), (x, y))
+
+    loops = []
+    while edges:
+        start = next(iter(edges))
+        current = start
+        loop = [start]
+        while True:
+            choices = edges.get(current)
+            if not choices:
+                break
+            nxt = choices.pop()
+            if not choices:
+                del edges[current]
+            if nxt == start:
+                if len(loop) >= 3:
+                    loops.append(loop)
+                break
+            loop.append(nxt)
+            current = nxt
+    return loops
 
 
 class FlatNumber3D:
@@ -41,26 +142,21 @@ class FlatNumber3D:
         x0, x1 = int(col * w / 5 + w * .012), int((col + 1) * w / 5 - w * .012)
         y0, y1 = int(row * h / 2 + h * .018), int((row + 1) * h / 2 - h * .018)
         crop = rgb[y0:y1, x0:x1]
-        gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
-        mask = np.where(gray >= threshold, 255, 0).astype(np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-        count, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
-        if count < 2:
+        gray = np.dot(crop[..., :3], np.asarray([0.299, 0.587, 0.114]))
+        mask = _largest_component(_close_mask(gray >= threshold))
+        if not mask.any():
             raise RuntimeError("No number found. Lower the threshold or check the sheet layout.")
-        largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-        mask = np.where(labels == largest, 255, 0).astype(np.uint8)
 
-        ys, xs = np.where(mask > 0)
+        ys, xs = np.where(mask)
         mask = mask[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
-        contours, hierarchy = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours or hierarchy is None:
+        contours = _boundary_loops(mask)
+        if not contours:
             raise RuntimeError("The selected number has no usable outline.")
 
         # Convert all outer and inner contours to one even-odd SVG path.
         paths = []
         for contour in contours:
-            epsilon = max(mask.shape) * 0.0015
-            points = cv2.approxPolyDP(contour, epsilon, True).reshape(-1, 2)
+            points = _simplify(contour, max(mask.shape) * 0.0015)
             if len(points) >= 3:
                 paths.append("M " + " L ".join(f"{x},{mask.shape[0]-y}" for x, y in points) + " Z")
 

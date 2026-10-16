@@ -1,1 +1,1 @@
-opencv-python-headless>=4.8,<5
+# No additional Python packages are required; ComfyUI supplies NumPy, Pillow, and Torch.

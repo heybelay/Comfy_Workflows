@@ -6,20 +6,14 @@ The rear face is placed on a single plane at `Z=0`, so the printable model sits 
 
 ## Install
 
-Install the one Python dependency into the repository-local package directory:
-
-```bash
-python -m pip install --target /workspace/Comfy_Workflows/.python_packages --no-deps -r /workspace/Comfy_Workflows/requirements.txt
-```
-
-Alternatively, clone this repository directly into ComfyUI's custom-node directory:
+Clone this repository directly into ComfyUI's custom-node directory, or download and extract the ZIP there:
 
 ```bash
 cd /path/to/ComfyUI/custom_nodes
 git clone https://github.com/heybelay/Comfy_Workflows.git
-cd Comfy_Workflows
-python3 -m pip install --target .python_packages --no-deps -r requirements.txt
 ```
+
+No extra Python packages are required.
 
 Blender must be available as `blender` on `PATH`. Restart ComfyUI after adding the node.
 
