@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 
@@ -86,9 +87,14 @@ class FlatNumber3D:
             config_path = handle.name
 
         script = os.path.join(os.path.dirname(__file__), "blender_build.py")
+        blender = shutil.which("blender")
+        if blender is None and os.path.isfile("/Applications/Blender.app/Contents/MacOS/Blender"):
+            blender = "/Applications/Blender.app/Contents/MacOS/Blender"
+        if blender is None:
+            raise RuntimeError("Blender was not found. Install Blender or add its executable to PATH.")
         try:
             result = subprocess.run(
-                ["blender", "--background", "--factory-startup", "--python", script, "--", config_path],
+                [blender, "--background", "--factory-startup", "--python", script, "--", config_path],
                 capture_output=True, text=True, timeout=180
             )
             expected = [os.path.join(output_root, stem + ".stl")] + [
