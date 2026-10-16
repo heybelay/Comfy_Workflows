@@ -1,0 +1,21 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {"image": "number_sheet.png", "upload": "image"}
+  },
+  "2": {
+    "class_type": "FlatNumber3D",
+    "inputs": {
+      "number_sheet": ["1", 0],
+      "number": 4,
+      "depth_mm": 12.0,
+      "height_mm": 100.0,
+      "bevel_mm": 3.0,
+      "threshold": 45
+    }
+  },
+  "3": {"class_type": "SaveImage", "inputs": {"images": ["2", 0], "filename_prefix": "number_4/front"}},
+  "4": {"class_type": "SaveImage", "inputs": {"images": ["2", 1], "filename_prefix": "number_4/left"}},
+  "5": {"class_type": "SaveImage", "inputs": {"images": ["2", 2], "filename_prefix": "number_4/right"}},
+  "6": {"class_type": "SaveImage", "inputs": {"images": ["2", 3], "filename_prefix": "number_4/back"}}
+}
