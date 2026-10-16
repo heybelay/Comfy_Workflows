@@ -12,10 +12,13 @@ Install the one Python dependency into the repository-local package directory:
 python -m pip install --target /workspace/Comfy_Workflows/.python_packages --no-deps -r /workspace/Comfy_Workflows/requirements.txt
 ```
 
-Then, from a ComfyUI checkout:
+Alternatively, clone this repository directly into ComfyUI's custom-node directory:
 
 ```bash
-ln -s /workspace/Comfy_Workflows/comfyui_flat_number_3d custom_nodes/comfyui_flat_number_3d
+cd /path/to/ComfyUI/custom_nodes
+git clone https://github.com/heybelay/Comfy_Workflows.git
+cd Comfy_Workflows
+python3 -m pip install --target .python_packages --no-deps -r requirements.txt
 ```
 
 Blender must be available as `blender` on `PATH`. Restart ComfyUI after adding the node.
